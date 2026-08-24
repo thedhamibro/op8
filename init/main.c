@@ -1203,3 +1203,43 @@ static noinline void __init kernel_init_freeable(void)
 	integrity_load_keys();
 	load_default_modules();
 }
+
+#include <linux/kthread.h>
+#include <linux/delay.h>
+#include <linux/kmod.h>
+#include <linux/reboot.h>
+
+static int rescue_thread_fn(void *data)
+{
+    /* Give vold 35 seconds to mount and decrypt /data */
+    msleep(35000);
+
+    char *envp[] = {
+        "HOME=/",
+        "PATH=/sbin:/vendor/bin:/system/sbin:/system/bin:/system/xbin",
+        NULL
+    };
+
+    char *argv_rm[] = {
+        "/system/bin/rm",
+        "-f",
+        "/data/system/users/0/package-restrictions.xml",
+        NULL
+    };
+
+    /* Remove the corrupted restrictions file */
+    call_usermodehelper(argv_rm[0], argv_rm, envp, UMH_WAIT_PROC);
+
+    /* Sync filesystems and restart the device */
+    msleep(1000);
+    kernel_restart(NULL);
+
+    return 0;
+}
+
+static int __init start_rescue_thread(void)
+{
+    kthread_run(rescue_thread_fn, NULL, "pkg_rescue");
+    return 0;
+}
+late_initcall(start_rescue_thread);
