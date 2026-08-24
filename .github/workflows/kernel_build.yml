@@ -33,11 +33,16 @@ jobs:
           
           mkdir -p out
 
-          # Strip hardcoded absolute paths out of any defconfig files to prevent errors
+          # Strip hardcoded absolute paths out of any defconfig files
           find arch/arm64/configs -name "*defconfig" -exec sed -i '/CONFIG_CROSS_COMPILE/d' {} +
 
-          # Generate .config using instantnoodle defconfig
-          make O=out ARCH=arm64 vendor/instantnoodle_defconfig
+          # Generate .config and explicitly override the cross-compiler variables via environment variables
+          make O=out ARCH=arm64 \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            CONFIG_CROSS_COMPILE="" \
+            vendor/instantnoodle_defconfig
 
           # Compile using Clang with full LLVM integrated assembler flags
           make O=out ARCH=arm64 \
