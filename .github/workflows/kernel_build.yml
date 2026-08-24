@@ -1,42 +1,56 @@
-name: Build Rescue Kernel
+name: Build OnePlus 8 Rescue Kernel
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
 
-      - name: Install Build Dependencies
+      - name: Install Build Environment Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev python3 git wget
+          sudo apt-get install -y \
+            build-essential bc bison flex libssl-dev libelf-dev \
+            python3 git wget curl zip libncurses-dev ccache
 
-      - name: Setup Clang Toolchain
+      - name: Setup Clang Toolchain (AOSP/Lineage Clang)
         run: |
-          git clone https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b --depth=1 clang
-          git clone https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 --depth=1 gcc
-          git clone https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9 --depth=1 gcc32
-
-      - name: Build Kernel
-        run: |
-          export PATH=$PWD/clang/bin:$PWD/gcc/bin:$PWD/gcc32/bin:$PATH
-          mkdir -p out
+          mkdir -p toolchain/clang toolchain/gcc64 toolchain/gcc32
           
-          # Use the instantnoodle (OnePlus 8) defconfig
+          # Pulling reliable prebuilts matching modern AOSP/Lineage standards
+          git clone https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b --depth=1 toolchain/clang
+          git clone https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 --depth=1 toolchain/gcc64
+          git clone https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9 --depth=1 toolchain/gcc32
+
+      - name: Configure and Compile Kernel
+        run: |
+          # Set up environment PATH
+          export PATH=$PWD/toolchain/clang/bin:$PWD/toolchain/gcc64/bin:$PWD/toolchain/gcc32/bin:$PATH
+          
+          mkdir -p out
+
+          # Strip hardcoded absolute paths out of any defconfig files to prevent errors
+          find arch/arm64/configs -name "*defconfig" -exec sed -i '/CONFIG_CROSS_COMPILE/d' {} +
+
+          # Generate .config using instantnoodle defconfig
           make O=out ARCH=arm64 vendor/instantnoodle_defconfig
 
-          # Compile kernel with LLVM/Clang
-          make O=out ARCH=arm64 CC=clang \
+          # Compile using Clang with full LLVM integrated assembler flags
+          make O=out ARCH=arm64 \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-android- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-            LLVM=1 LLVM_IAS=1 -j$(nproc)
+            LLVM=1 \
+            LLVM_IAS=1 \
+            -j$(nproc)
 
-      - name: Upload Built Boot/Image
+      - name: Archive Built Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: compiled-kernel-image
+          name: instantnoodle-rescue-boot-image
           path: out/arch/arm64/boot/Image.gz-dtb
